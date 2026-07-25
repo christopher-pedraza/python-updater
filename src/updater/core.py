@@ -23,6 +23,7 @@ class AppUpdater:
         current_version: str,
         on_log: Callable[[str], None] | None = None,
         on_error: Callable[[str], None] | None = None,
+        on_progress: Callable[[float], None] | None = None,
     ):
         self.repo_path = repo_path
         self.current_version = current_version
@@ -31,6 +32,7 @@ class AppUpdater:
         # so we don't have to write `if self.on_log:` every single time.
         self.on_log = on_log or (lambda msg: None)
         self.on_error = on_error or (lambda msg: None)
+        self.on_progress = on_progress or (lambda percentage: None)
 
         self.os_type = self._detect_os()
         self.temp_dir = self._setup_temp_directory()
@@ -163,19 +165,36 @@ class AppUpdater:
                 urllib.request.urlopen(req, timeout=30) as response,
                 open(save_path, "wb") as out_file,
             ):
-                # 5. The Chunked Download Loop
-                chunk_size = 1024 * 1024
+                total_bytes = int(response.getheader("Content-Length", 0))
+
+                # Use a smaller 64KB chunk for smooth, low-memory reading
+                chunk_size = 64 * 1024
+                downloaded_bytes = 0
+
+                # Track the last percentage we sent to the UI
+                last_reported_percent = -1
 
                 while True:
-                    # Read a chunk from the internet
                     chunk = response.read(chunk_size)
-
-                    # If the chunk is empty, the download is completely finished
                     if not chunk:
+                        # Ensure we hit 100% when completely finished
+                        if total_bytes and last_reported_percent != 100:
+                            self.on_progress(100)
                         break
 
-                    # Write the chunk to the hard drive
+                    # Write the chunk to the hard drive immediately
                     out_file.write(chunk)
+
+                    downloaded_bytes += len(chunk)
+
+                    if total_bytes:
+                        # Calculate current integer percentage
+                        current_percent = int((downloaded_bytes / total_bytes) * 100)
+
+                        # Only update the UI if the integer percentage has gone up
+                        if current_percent > last_reported_percent:
+                            self.on_progress(current_percent)
+                            last_reported_percent = current_percent
 
             return save_path
 
