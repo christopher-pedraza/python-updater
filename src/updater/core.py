@@ -21,12 +21,15 @@ class AppUpdater:
         self,
         repo_path: str,
         current_version: str,
+        github_token: str | None = None,
         on_log: Callable[[str], None] | None = None,
         on_error: Callable[[str], None] | None = None,
         on_progress: Callable[[float], None] | None = None,
+        asset_extensions: dict[str, tuple[str, ...]] | None = None,
     ):
         self.repo_path = repo_path
         self.current_version = current_version
+        self.github_token = github_token
 
         # Save the callbacks. If the user didn't provide one, use a dummy lambda
         # so we don't have to write `if self.on_log:` every single time.
@@ -36,6 +39,12 @@ class AppUpdater:
 
         self.os_type = self._detect_os()
         self.temp_dir = self._setup_temp_directory()
+
+        self.asset_extensions = asset_extensions or {
+            "windows": (".exe",),
+            "mac": (".dmg", ".pkg", ".zip"),
+            "linux": (".AppImage", ".tar.gz", ".deb"),
+        }
 
     def _detect_os(self) -> OSType:
         """
@@ -99,6 +108,9 @@ class AppUpdater:
         url = f"https://api.github.com/repos/{self.repo_path}/releases/latest"
         req = urllib.request.Request(url, headers={"User-Agent": "CustomAppUpdater"})
 
+        if self.github_token:
+            req.add_header("Authorization", f"Bearer {self.github_token}")
+
         try:
             with urllib.request.urlopen(req, timeout=10) as response:
                 raw_data = response.read().decode("utf-8")
@@ -118,13 +130,7 @@ class AppUpdater:
         Loops through the release assets and finds the correct download URL
         for the current operating system. Returns None if not found.
         """
-        match self.os_type:
-            case OSType.WINDOWS:
-                valid_extensions = (".exe",)
-            case OSType.MAC:
-                valid_extensions = (".dmg", ".pkg", ".zip")
-            case OSType.LINUX:
-                valid_extensions = (".AppImage", ".tar.gz", ".deb")
+        valid_extensions = self.asset_extensions.get(self.os_type.value)
 
         target_asset = next(
             (
@@ -158,6 +164,9 @@ class AppUpdater:
         req = urllib.request.Request(
             download_url, headers={"User-Agent": "CustomAppUpdater"}
         )
+
+        if self.github_token:
+            req.add_header("Authorization", f"Bearer {self.github_token}")
 
         try:
             # 4. Open the network stream and the local file stream simultaneously
